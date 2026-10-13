@@ -1,97 +1,78 @@
 # =============================================================================
 #  RemoteControl — Makefile de build de produção
 # =============================================================================
-#  Compila a partir de qualquer SO (Linux, macOS, Windows) e gera os binários
-#  de produção. O cliente Windows é otimizado:
-#     -ldflags "-s -w"   -> remove tabela de símbolos (-s) e informação DWARF
-#                           de debug (-w): binário mais pequeno e menos trivial
-#                           de analisar.
-#     -H=windowsgui      -> aplicação GUI: não abre janela de consola (cmd).
+#  Cliente Windows otimizado para produção:
+#     -ldflags "-s -w"   remove tabela de símbolos (-s) e dados de debug (-w)
+#     -H=windowsgui      aplicação GUI: sem janela de consola (cmd)
+#     -trimpath          remove caminhos absolutos do sistema de build
 #
-#  Pré-requisitos: Go >= 1.21 instalado.
+#  Pré-requisitos: Go >= 1.22.  Antes do primeiro build: `make tidy`.
 #
 #  Uso:
-#     make                 # compila tudo (client, server, operator)
-#     make client          # só o cliente Windows (GUI, otimizado)
-#     make server          # só o relay (Linux amd64, para o Hetzner)
-#     make operator        # só o operador (SO/arch do host atual)
-#     make VERSION=1.2.0    # injeta a versão no binário
+#     make tidy            # go mod tidy (descarrega deps, gera go.sum)
+#     make                 # compila client, server e operator
+#     make client          # cliente Windows (GUI, otimizado)
+#     make server          # relay Linux (para a Hetzner)
+#     make operator        # operador (host atual)
+#     make VERSION=1.0.0    # injeta a versão
 #     make clean
 # =============================================================================
 
-# ---- Configuração -----------------------------------------------------------
-# Ajuste estes caminhos à estrutura real do seu projeto (cmd/<app>).
-CMD_CLIENT   ?= ./cmd/client
-CMD_SERVER   ?= ./cmd/server
-CMD_OPERATOR ?= ./cmd/operator
+CMD_CLIENT   ?= ./client
+CMD_SERVER   ?= ./server
+CMD_OPERATOR ?= ./operator
 
-BIN_DIR      ?= ./bin
-VERSION      ?= dev
-COMMIT       := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
-DATE         := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BIN_DIR ?= ./bin
+VERSION ?= dev
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# Flags de linker partilhadas: strip de símbolos/debug + metadados de versão.
-# As variáveis main.version/commit/date são opcionais — remova o -X se o
-# seu pacote main não as declarar.
 STRIP_FLAGS  := -s -w
-VERSION_VARS := -X 'main.version=$(VERSION)' \
-                -X 'main.commit=$(COMMIT)' \
-                -X 'main.buildDate=$(DATE)'
-
+VERSION_VARS := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.buildDate=$(DATE)'
 LDFLAGS_PROD := $(STRIP_FLAGS) $(VERSION_VARS)
 
-# CGO desligado -> binários estáticos, cross-compile sem toolchain de C.
 export CGO_ENABLED := 0
 
-# ---- Alvos ------------------------------------------------------------------
-.PHONY: all client server operator clean tidy verify help
+.PHONY: all client client-console server operator tidy verify clean help
 
-all: client server operator ## Compila client, server e operator
+all: client server operator ## Compila tudo
 
 client: ## Cliente Windows 64-bit (GUI sem consola, otimizado)
-	@echo ">> A compilar cliente (windows/amd64, GUI, strip)..."
+	@echo ">> cliente (windows/amd64, GUI, strip)"
 	@mkdir -p $(BIN_DIR)
-	GOOS=windows GOARCH=amd64 \
-		go build -trimpath \
-			-ldflags "$(LDFLAGS_PROD) -H=windowsgui" \
-			-o $(BIN_DIR)/rc-client.exe $(CMD_CLIENT)
-	@echo ">> Gerado: $(BIN_DIR)/rc-client.exe"
+	GOOS=windows GOARCH=amd64 go build -trimpath \
+		-ldflags "$(LDFLAGS_PROD) -H=windowsgui" \
+		-o $(BIN_DIR)/rc-client.exe $(CMD_CLIENT)
+	@echo ">> gerado: $(BIN_DIR)/rc-client.exe"
 
-server: ## Relay para o Hetzner (linux/amd64, otimizado)
-	@echo ">> A compilar server/relay (linux/amd64, strip)..."
+client-console: ## Cliente Windows com consola visível (debug: mostra logs)
+	@echo ">> cliente DEBUG (windows/amd64, com consola)"
 	@mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 \
-		go build -trimpath \
-			-ldflags "$(LDFLAGS_PROD)" \
-			-o $(BIN_DIR)/rc-server $(CMD_SERVER)
-	@echo ">> Gerado: $(BIN_DIR)/rc-server"
+	GOOS=windows GOARCH=amd64 go build -trimpath \
+		-ldflags "$(LDFLAGS_PROD)" \
+		-o $(BIN_DIR)/rc-client-debug.exe $(CMD_CLIENT)
+
+server: ## Relay para a Hetzner (linux/amd64, otimizado)
+	@echo ">> server/relay (linux/amd64, strip)"
+	@mkdir -p $(BIN_DIR)
+	GOOS=linux GOARCH=amd64 go build -trimpath \
+		-ldflags "$(LDFLAGS_PROD)" \
+		-o $(BIN_DIR)/rc-server $(CMD_SERVER)
 
 operator: ## Operador (SO/arquitetura do host atual)
-	@echo ">> A compilar operador (host nativo, strip)..."
+	@echo ">> operador (host nativo, strip)"
 	@mkdir -p $(BIN_DIR)
-	go build -trimpath \
-		-ldflags "$(LDFLAGS_PROD)" \
+	go build -trimpath -ldflags "$(LDFLAGS_PROD)" \
 		-o $(BIN_DIR)/rc-operator $(CMD_OPERATOR)
-	@echo ">> Gerado: $(BIN_DIR)/rc-operator"
 
-# Variante opcional do cliente que MANTÉM a consola — útil para debug,
-# pois mostra logs e panics diretamente no terminal.
-client-console: ## Cliente Windows com consola visível (debug)
-	@echo ">> A compilar cliente DEBUG (windows/amd64, com consola)..."
-	@mkdir -p $(BIN_DIR)
-	GOOS=windows GOARCH=amd64 \
-		go build -trimpath \
-			-ldflags "$(LDFLAGS_PROD)" \
-			-o $(BIN_DIR)/rc-client-debug.exe $(CMD_CLIENT)
-
-tidy: ## go mod tidy
+tidy: ## go mod tidy (necessário no primeiro build)
 	go mod tidy
 
-verify: ## vet + testes rápidos
+verify: ## go vet + testes
 	go vet ./...
 	go test ./...
 
-clean: ## Remove artefactos de build
+clean: ## Remove artefactos
 	rm -rf $(BIN_DIR)
 
 help: ## Mostra esta ajuda

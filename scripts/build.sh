@@ -14,9 +14,9 @@
 # =============================================================================
 set -euo pipefail
 
-CMD_CLIENT="${CMD_CLIENT:-./cmd/client}"
-CMD_SERVER="${CMD_SERVER:-./cmd/server}"
-CMD_OPERATOR="${CMD_OPERATOR:-./cmd/operator}"
+CMD_CLIENT="${CMD_CLIENT:-./client}"
+CMD_SERVER="${CMD_SERVER:-./server}"
+CMD_OPERATOR="${CMD_OPERATOR:-./operator}"
 BIN_DIR="${BIN_DIR:-./bin}"
 
 VERSION="${VERSION:-dev}"
