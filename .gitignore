@@ -1,0 +1,6 @@
+
+# Definições locais pessoais do Claude Code (permissões)
+.claude/settings.local.json
+
+# Executáveis compilados
+bin/
