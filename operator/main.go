@@ -2,13 +2,11 @@
 //
 // Responsabilidades:
 //   - Ligar ao relay e concluir o handshake E2EE (X25519 + AES-256-GCM).
-//   - Receber frames cifrados do cliente, decifrá-los e gravar o último em
-//     disco (frame_latest.jpg por omissão) para visualização.
-//   - Ler comandos do stdin e enviá-los cifrados como eventos de input.
+//   - Receber frames cifrados do cliente, decifrá-los e mostrá-los: num
+//     viewer web (flag -ui) ou gravando o último em disco (modo stdin).
+//   - Enviar eventos de rato/teclado cifrados (do viewer ou do stdin).
 //
-// É cross-platform (compila em Linux/macOS/Windows). A visualização gráfica
-// em tempo real fica fora do âmbito; aqui gravamos o frame mais recente, o
-// que é suficiente para testar o fluxo ponta-a-ponta.
+// É cross-platform (compila em Linux/macOS/Windows).
 package main
 
 import (
@@ -49,7 +47,8 @@ func main() {
 	server := flag.String("server", "ws://localhost:8080/ws", "URL do relay (ws:// ou wss://)")
 	room := flag.String("room", "", "código da sala/sessão (igual no cliente)")
 	psk := flag.String("psk", "", "senha pré-partilhada da sessão (E2EE anti-MITM)")
-	out := flag.String("out", "frame_latest.jpg", "ficheiro onde gravar o último frame")
+	out := flag.String("out", "frame_latest.jpg", "ficheiro onde gravar o último frame (modo sem UI)")
+	uiAddr := flag.String("ui", "", "endereço do viewer web local (ex.: :9000); vazio = modo stdin")
 	flag.Parse()
 
 	if *room == "" || *psk == "" {
@@ -76,13 +75,17 @@ func main() {
 	pubB64 := base64.StdEncoding.EncodeToString(crypto.PublicKeyBytes(priv))
 
 	var (
-		mu      sync.Mutex
-		sess    *crypto.Session
-		curMode = protocol.ModeDenied
-		derived = make(chan struct{})
-		once    sync.Once
+		mu       sync.Mutex
+		sess     *crypto.Session
+		ui       *UIServer
+		curMode  = protocol.ModeDenied
+		derived  = make(chan struct{})
+		done     = make(chan struct{})
+		once     sync.Once
+		doneOnce sync.Once
 	)
 	closeDerived := func() { once.Do(func() { close(derived) }) }
+	closeDone := func() { doneOnce.Do(func() { close(done) }) }
 
 	// Hello repetido até derivar (robusto à ordem de entrada).
 	go func() {
@@ -121,6 +124,7 @@ func main() {
 	// Loop de leitura: handshake + receção de frames/permissões.
 	go func() {
 		defer closeDerived()
+		defer closeDone()
 		for {
 			_, raw, err := c.ReadMessage()
 			if err != nil {
@@ -177,12 +181,15 @@ func main() {
 						log.Print(">> acesso recusado pelo utilizador remoto.")
 					}
 				case protocol.MsgFrame:
-					if err := os.WriteFile(*out, m.JPEG, 0o644); err != nil {
-						log.Printf("gravar frame falhou: %v", err)
-						continue
+					mu.Lock()
+					u := ui
+					mu.Unlock()
+					if u != nil {
+						// Modo GUI: envia o frame ao browser em tempo real.
+						u.PushFrame(m.JPEG)
+					} else if werr := os.WriteFile(*out, m.JPEG, 0o644); werr != nil {
+						log.Printf("gravar frame falhou: %v", werr)
 					}
-					log.Printf("frame recebido: %dx%d, %d bytes -> %s",
-						m.Width, m.Height, len(m.JPEG), *out)
 				}
 			case protocol.TypeBye:
 				log.Print(">> o cliente terminou a sessão.")
@@ -203,6 +210,26 @@ func main() {
 		log.Fatal("handshake não concluído (ligação caiu)")
 	}
 
+	// Modo GUI: inicia o viewer web local e transmite os frames ao browser.
+	if *uiAddr != "" {
+		u := NewUIServer(func(ev protocol.InputEvent) {
+			if err := sendEncrypted(protocol.Message{Type: protocol.MsgInput, Input: &ev}); err != nil {
+				log.Printf("envio de input falhou: %v", err)
+			}
+		})
+		if err := u.Start(*uiAddr); err != nil {
+			log.Fatalf("iniciar viewer web falhou: %v", err)
+		}
+		mu.Lock()
+		ui = u
+		mu.Unlock()
+		log.Printf("viewer web pronto: abra http://localhost%s no browser", *uiAddr)
+		<-done // bloqueia até a ligação ao relay terminar
+		log.Print("ligação terminada; a sair.")
+		return
+	}
+
+	// Modo stdin (sem UI): comandos em texto.
 	printHelp(*out)
 	commandLoop(sendEncrypted, func() string {
 		mu.Lock()
