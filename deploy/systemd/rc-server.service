@@ -1,0 +1,56 @@
+# =============================================================================
+#  RemoteControl — unidade systemd do relay
+# =============================================================================
+#  Corre o relay como serviço: arranca no boot, reinicia se falhar e executa
+#  com um utilizador dedicado e sem privilégios, bem "confinado".
+#
+#  O relay escuta APENAS em 127.0.0.1 — quem termina o TLS e expõe o :443 à
+#  internet é o Nginx (ver deploy/nginx/remotecontrol.conf). Assim o processo
+#  Go nunca está diretamente exposto.
+#
+#  Instalação: ver deploy/README.md (ou corra deploy/deploy.sh).
+# =============================================================================
+[Unit]
+Description=RemoteControl relay (sinalizacao WebSocket, E2EE as cegas)
+Documentation=https://github.com/filipebmp/remotecontrol
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rcrelay
+Group=rcrelay
+ExecStart=/usr/local/bin/rc-server -listen 127.0.0.1:8080
+Restart=on-failure
+RestartSec=2s
+
+# --- Confinamento (hardening) -----------------------------------------------
+# O relay só precisa de rede TCP; tudo o resto é negado.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Não liga a portas <1024, por isso não precisa de capabilities nenhumas.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# --- Limites ----------------------------------------------------------------
+# Muitas sessões simultâneas => muitos ficheiros/sockets abertos.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
