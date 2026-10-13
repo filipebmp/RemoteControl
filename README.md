@@ -68,7 +68,19 @@ make client-console  # variante de debug com consola visível
    ```
    Surge um diálogo: **Sim** = controlo total, **Não** = só visualização,
    **Cancelar** = recusar.
-3. **Operador**:
+3. **Operador** — duas formas de ver/controlar:
+
+   **a) Viewer web (recomendado)** — janela em tempo real no browser, com rato
+   e teclado:
+   ```bash
+   ./rc-operator -server wss://relay.exemplo.com/ws -room SALA123 -psk SENHA-FORTE -ui :9000
+   ```
+   Abra `http://localhost:9000` no browser. O ecrã remoto aparece em tempo
+   real; clicar na imagem foca-a e passa a enviar rato/teclado ao cliente. O
+   browser só fala com o `localhost` — todo o E2EE fica no processo operador.
+
+   **b) Modo stdin (sem UI)** — grava o último frame em disco e aceita comandos
+   em texto:
    ```bash
    ./rc-operator -server wss://relay.exemplo.com/ws -room SALA123 -psk SENHA-FORTE
    ```
@@ -90,7 +102,12 @@ make client-console  # variante de debug com consola visível
 
 ## Limitações / próximos passos
 
-- O operador grava frames em disco em vez de os mostrar numa janela (um viewer
-  GUI em tempo real fica por fazer).
-- `go.sum` não está incluído — corra `make tidy`.
+- `go.sum` não está incluído — corra `make tidy` (requer acesso ao proxy de
+  módulos Go) antes do primeiro build.
 - Captura via GDI; para alta taxa de frames considere a Desktop Duplication API.
+- O pacote `internal/screen` contém uma deteção multi-monitor mais completa
+  (com seleção de região por `Target`) que ainda **não está ligada** ao
+  cliente — hoje o `client/screen.go` tem a sua própria implementação. Unificar
+  as duas fica por fazer.
+- O viewer web transmite JPEG completos a cada frame; um codec com delta/vídeo
+  reduziria muito a largura de banda.
